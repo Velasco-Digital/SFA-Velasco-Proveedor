@@ -1,10 +1,9 @@
-// app/layout.tsx
 import type { Metadata } from "next";
-
+import "./globals.css"; // <-- Esto es lo que "prende" el diseño
 
 export const metadata: Metadata = {
   title: "VD SFA - Velasco Digital",
-  description: "Sistema de Distribución y Reparto",
+  description: "Sistema de Distribución y Reparto Profesional",
 };
 
 export default function RootLayout({
@@ -14,7 +13,10 @@ export default function RootLayout({
 }) {
   return (
     <html lang="es">
-      <body style={{ margin: 0, padding: 0, backgroundColor: 'black' }}>
+      <head>
+        <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=0" />
+      </head>
+      <body className="bg-black text-white antialiased">
         {children}
       </body>
     </html>
