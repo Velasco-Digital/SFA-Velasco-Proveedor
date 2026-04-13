@@ -3,7 +3,7 @@ import { useState, useEffect, useMemo } from 'react';
 import { supabase } from '../lib/supabase';
 import { 
   PlusCircle, MapPin, QrCode, Truck, Users, LayoutDashboard, 
-  X, Save, Navigation, Edit2, Phone, Trash2, AlertTriangle, Package, ShoppingBag, CheckCircle2, ChevronRight, Search, Clock
+  X, Save, Navigation, Edit2, Phone, Trash2, AlertTriangle, Package, ShoppingBag, CheckCircle2, ChevronRight, Search, Clock, Hash
 } from 'lucide-react';
 import { QRCodeSVG } from 'qrcode.react';
 
@@ -23,6 +23,13 @@ export default function SFADashboard() {
   const [selectedSocio, setSelectedSocio] = useState<any>(null);
   const [activeRouteDetail, setActiveRouteDetail] = useState<any>(null);
   const [selectorType, setSelectorType] = useState<'repartidor' | 'tienda' | null>(null);
+  
+  // Modal de Cantidad (iPhone Style)
+  const [isQuantityModalOpen, setIsQuantityModalOpen] = useState(false);
+  const [pendingProduct, setPendingProduct] = useState<any>(null);
+  const [tempQuantityInput, setTempQuantityInput] = useState('1');
+
+  // Notificación (iPhone Style)
   const [alertConfig, setAlertConfig] = useState<any>({ show: false, type: 'success', title: '', msg: '' });
 
   // --- FORMULARIOS ---
@@ -59,7 +66,6 @@ export default function SFADashboard() {
     setLoading(false);
   }
 
-  // --- FUNCIÓN DEL BOTÓN "+" ---
   const handlePlusButton = () => {
     setEditId(null);
     setRutaSocio(null); setParadas([]); setCurrentTienda(null);
@@ -71,46 +77,80 @@ export default function SFADashboard() {
     setAlertConfig({ show: true, type, title, msg });
   };
 
-  // BUSCADOR INTELIGENTE EN TIEMPO REAL
   const prodsFiltrados = useMemo(() => {
-    if (!filtroProd) return []; // No mostrar nada si no hay búsqueda para no amontonar
+    if (!filtroProd) return []; 
     return productos.filter(p => p.nombre.toLowerCase().includes(filtroProd.toLowerCase()));
   }, [productos, filtroProd]);
 
-  const agregarItemARuta = (prod: any) => {
-    if (!currentTienda) return;
-    const cantStr = prompt(`Cantidad de [${prod.nombre}] para esta tienda:`, "1");
-    const cant = parseInt(cantStr || "0");
-    if (cant <= 0) return;
+  // Abre modal de cantidad pro en lugar del prompt nativo
+  const iniciarAgregadoProducto = (prod: any) => {
+    setPendingProduct(prod);
+    setTempQuantityInput('1');
+    setIsQuantityModalOpen(true);
+  };
+
+  const confirmarCantidadProducto = () => {
+    const cant = parseInt(tempQuantityInput) || 1;
+    if (cant <= 0 || !pendingProduct || !currentTienda) {
+        setIsQuantityModalOpen(false);
+        return;
+    }
 
     const paradaIdx = paradas.findIndex(p => p.tienda.id === currentTienda.id);
     let nuevasParadas = [...paradas];
 
     if (paradaIdx === -1) {
-      nuevasParadas.push({ tienda: currentTienda, items: [{ ...prod, cantidad: cant }] });
+      nuevasParadas.push({ tienda: currentTienda, items: [{ ...pendingProduct, cantidad: cant }] });
     } else {
-      const itemIdx = nuevasParadas[paradaIdx].items.findIndex((i: any) => i.id === prod.id);
-      if (itemIdx === -1) nuevasParadas[paradaIdx].items.push({ ...prod, cantidad: cant });
+      const itemIdx = nuevasParadas[paradaIdx].items.findIndex((i: any) => i.id === pendingProduct.id);
+      if (itemIdx === -1) nuevasParadas[paradaIdx].items.push({ ...pendingProduct, cantidad: cant });
       else nuevasParadas[paradaIdx].items[itemIdx].cantidad += cant;
     }
     setParadas(nuevasParadas);
     setFiltroProd('');
+    setIsQuantityModalOpen(false);
+    setPendingProduct(null);
   };
 
+  // Lógica de guardado de ruta FIX
   async function guardarRuta() {
-    if (!rutaSocio || paradas.length === 0) return;
+    if (!rutaSocio) {
+        showAlert('error', 'Falta Socio', 'Por favor selecciona un repartidor para la ruta.');
+        return;
+    }
+    if (paradas.length === 0) {
+        showAlert('error', 'Sin Paradas', 'Agrega al menos una tienda con productos a la ruta.');
+        return;
+    }
+
     const totalRuta = paradas.reduce((acc, p) => acc + p.items.reduce((ai:any, i:any)=> ai + (i.precio * i.cantidad), 0), 0);
     
-    const { data: rData } = await supabase.from('sfa_rutas').insert([{ repartidor_id: rutaSocio.id, total_efectivo_esperado: totalRuta }]).select().single();
+    // 1. Guardar Ruta Maestra
+    const { data: rData, error: rError } = await supabase.from('sfa_rutas').insert([{ repartidor_id: rutaSocio.id, total_efectivo_esperado: totalRuta }]).select().single();
+    
+    if (rError) {
+        showAlert('error', 'Error Nube', rError.message);
+        return;
+    }
+
     if (rData) {
       for (const p of paradas) {
         const totalP = p.items.reduce((ai:any, i:any)=> ai + (i.precio * i.cantidad), 0);
-        const { data: pedData } = await supabase.from('sfa_pedidos').insert([{ ruta_id: rData.id, tienda_id: p.tienda.id, total_pago: totalP }]).select().single();
-        const items = p.items.map((i:any) => ({ pedido_id: pedData.id, producto_id: i.id, cantidad: i.cantidad, precio_unitario: i.precio, subtotal: i.precio * i.cantidad }));
-        await supabase.from('sfa_pedido_items').insert(items);
+        // 2. Guardar Pedido por Tienda
+        const { data: pedData, error: pedError } = await supabase.from('sfa_pedidos').insert([{ ruta_id: rData.id, tienda_id: p.tienda.id, total_pago: totalP }]).select().single();
+        
+        if (pedData) {
+          // 3. Guardar Desglose de Productos
+          const items = p.items.map((i:any) => ({ pedido_id: pedData.id, producto_id: i.id, cantidad: i.cantidad, precio_unitario: i.precio, subtotal: i.precio * i.cantidad }));
+          const { error: itemsError } = await supabase.from('sfa_pedido_items').insert(items);
+          if (itemsError) console.error("Error al guardar items de tienda:", p.tienda.nombre_tienda, itemsError.message);
+        } else if (pedError) {
+            console.error("Error al guardar pedido de tienda:", p.tienda.nombre_tienda, pedError.message);
+        }
       }
-      setIsModalOpen(false); cargarDatos();
-      showAlert('success', 'Operación Exitosa', `Ruta asignada a ${rutaSocio.nombre}`);
+      setIsModalOpen(false); 
+      cargarDatos();
+      showAlert('success', 'Ruta Asignada ✓', `Socio ${rutaSocio.nombre} sincronizado.`);
     }
   }
 
@@ -126,7 +166,8 @@ export default function SFADashboard() {
     } else if (activeTab === 'equipo') {
       res = await supabase.from('sfa_equipo').insert([{ nombre: sNombre, telefono: sTel }]);
     }
-    if (!res?.error) { setIsModalOpen(false); cargarDatos(); showAlert('success', '¡Éxito!', 'Guardado en la nube.'); }
+    if (!res?.error) { setIsModalOpen(false); cargarDatos(); showAlert('success', '¡Éxito!', 'Datos sincronizados.'); }
+    else { showAlert('error', 'Error', res.error.message); }
   }
 
   return (
@@ -160,7 +201,7 @@ export default function SFADashboard() {
               </div>
             ))}
 
-            {/* PRODUCTOS / INVENTARIO */}
+            {/* PRODUCTOS (STOCK) */}
             {activeTab === 'productos' && (
               <div className="grid grid-cols-2 gap-4">
                 {productos.map(p => (
@@ -168,18 +209,18 @@ export default function SFADashboard() {
                     <div className="bg-blue-500/10 p-3 rounded-2xl text-blue-500 w-fit mb-4"><Package size={22}/></div>
                     <h3 className="font-bold text-sm mb-1 leading-tight">{p.nombre}</h3>
                     <p className="text-blue-500 font-black text-lg">${p.precio}</p>
-                    <span className="text-[9px] font-black text-zinc-500 uppercase tracking-widest">Stock: {p.stock}</span>
+                    <span className="text-[9px] font-black text-zinc-500 uppercase tracking-widest">Existencia: {p.stock}</span>
                   </div>
                 ))}
               </div>
             )}
 
-            {/* RUTAS ACTIVAS */}
+            {/* RUTAS (MONITOREO) */}
             {activeTab === 'rutas' && rutas.map(r => (
-              <div key={r.id} onClick={() => setActiveRouteDetail(r)} className="bg-zinc-900 border border-zinc-800 p-6 rounded-[32px] mb-4 active:scale-[0.98] transition-all">
+              <div key={r.id} onClick={() => setActiveRouteDetail(r)} className="bg-zinc-900 border border-zinc-800 p-6 rounded-[32px] mb-4 active:scale-[0.98] transition-all relative">
                 <div className="flex justify-between items-start mb-6">
-                  <div><h3 className="text-lg font-black italic uppercase tracking-tighter text-blue-500">{r.sfa_equipo?.nombre}</h3><p className="text-[10px] text-zinc-500 font-bold uppercase">{r.fecha}</p></div>
-                  <div className="text-right"><p className="text-2xl font-black text-green-500">${r.total_efectivo_esperado}</p><p className="text-[9px] text-zinc-500 font-bold uppercase italic">Cobro Total</p></div>
+                  <div><h3 className="text-lg font-black italic">{r.sfa_equipo?.nombre}</h3><p className="text-[10px] text-zinc-500 font-bold tracking-widest uppercase">{r.fecha}</p></div>
+                  <div className="text-right"><p className="text-2xl font-black text-green-500">${r.total_efectivo_esperado}</p><p className="text-[9px] text-zinc-500 font-bold uppercase tracking-tighter italic">Total Ruta</p></div>
                 </div>
                 <div className="flex items-center gap-4">
                    <div className="flex -space-x-2">
@@ -187,17 +228,17 @@ export default function SFADashboard() {
                        <div key={i} className={`w-3 h-3 rounded-full border border-black ${p.estado === 'entregado' ? 'bg-green-500 shadow-[0_0_8px_rgba(34,197,94,0.5)]' : 'bg-zinc-700'}`} />
                      ))}
                    </div>
-                   <span className="text-[10px] font-black text-blue-500 uppercase tracking-widest">Tiendas: {r.sfa_pedidos?.filter((p:any)=>p.estado==='entregado').length}/{r.sfa_pedidos?.length}</span>
+                   <span className="text-[10px] font-black text-blue-500 uppercase tracking-widest">Tiendas Visitadas: {r.sfa_pedidos?.filter((p:any)=>p.estado==='entregado').length}/{r.sfa_pedidos?.length}</span>
                 </div>
               </div>
             ))}
 
             {/* EQUIPO */}
             {activeTab === 'equipo' && equipo.map(s => (
-              <div key={s.id} onClick={() => setSelectedSocio(s)} className="bg-zinc-900/50 border border-zinc-800 p-5 rounded-[24px] mb-4 flex justify-between items-center active:bg-zinc-800 transition-all">
+              <div key={s.id} onClick={() => setSelectedSocio(s)} className="bg-zinc-900/50 border border-zinc-800 p-5 rounded-[24px] mb-4 flex justify-between items-center active:bg-zinc-800">
                 <div className="flex items-center gap-4">
                   <div className="p-4 rounded-2xl bg-zinc-800 text-zinc-400"><Users size={24} /></div>
-                  <div><h3 className="font-bold text-base">{s.nombre}</h3><p className="text-[10px] text-blue-500 font-black uppercase tracking-widest">Socio de Negocio</p></div>
+                  <div><h3 className="font-bold text-base">{s.nombre}</h3><p className="text-[10px] text-blue-500 font-black uppercase tracking-widest">Socio Estratégico</p></div>
                 </div>
                 <ChevronRight size={20} className="text-zinc-700" />
               </div>
@@ -206,22 +247,48 @@ export default function SFADashboard() {
         )}
       </main>
 
-      {/* BOTTOM SHEETS IPHONE STYLE (SELECTOR DE SOCIO / TIENDA) */}
+      {/* MODAL DE CANTIDAD PRO (IPHONE STYLE) */}
+      {isQuantityModalOpen && pendingProduct && (
+        <div className="fixed inset-0 z-[800] bg-black/80 backdrop-blur-sm flex items-center justify-center animate-in fade-in duration-300">
+          <div className="bg-zinc-900 border border-zinc-800 w-full max-w-[300px] rounded-[32px] overflow-hidden shadow-2xl animate-in zoom-in-95">
+            <div className="p-8 text-center">
+              <div className="bg-blue-500/10 p-3 rounded-2xl text-blue-500 w-fit mb-5 mx-auto"><Hash size={24}/></div>
+              <h2 className="text-lg font-bold mb-2 italic tracking-tighter">Asignar Cantidad</h2>
+              <p className="text-[11px] text-zinc-500 leading-relaxed uppercase font-black mb-5 tracking-widest">{pendingProduct.nombre}</p>
+              
+              <input 
+                type="number"
+                value={tempQuantityInput}
+                onChange={e => setTempQuantityInput(e.target.value)}
+                className="w-full bg-black border border-zinc-800 rounded-2xl p-4 text-center text-3xl font-black text-blue-500 outline-none focus:border-blue-500"
+                placeholder="0"
+                autoFocus
+              />
+            </div>
+            <div className="flex border-t border-zinc-800">
+              <button onClick={() => setIsQuantityModalOpen(false)} className="flex-1 p-5 text-xs font-medium border-r border-zinc-800 active:bg-zinc-800 text-zinc-400 uppercase tracking-widest">Cancelar</button>
+              <button onClick={confirmarCantidadProducto} className="flex-1 p-5 text-xs font-black text-blue-500 active:bg-zinc-800 uppercase tracking-widest">Confirmar ✓</button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* BOTTOM SHEETS IPHONE STYLE */}
       {selectorType && (
-        <div className="fixed inset-0 z-[700] bg-black/70 backdrop-blur-sm flex items-end animate-in fade-in duration-300" onClick={() => setSelectorType(null)}>
+        <div className="fixed inset-0 z-[700] bg-black/60 backdrop-blur-sm flex items-end animate-in fade-in duration-300" onClick={() => setSelectorType(null)}>
           <div className="bg-zinc-900 w-full rounded-t-[40px] p-8 max-h-[70vh] overflow-y-auto animate-in slide-in-from-bottom duration-500 shadow-2xl border-t border-zinc-800" onClick={e => e.stopPropagation()}>
             <div className="w-12 h-1.5 bg-zinc-800 rounded-full mx-auto mb-8" />
             <h2 className="text-xl font-black italic mb-6 uppercase tracking-tighter">Seleccionar {selectorType === 'repartidor' ? 'Socio' : 'Tienda'}</h2>
             <div className="space-y-3 pb-10">
               {(selectorType === 'repartidor' ? equipo : tiendas).length === 0 ? (
-                 <p className="text-center text-zinc-600 text-xs py-10 uppercase font-black">No hay registros disponibles</p>
+                 <p className="text-center text-zinc-600 text-xs py-10 uppercase font-black">No hay registros aún</p>
               ) : (
                 (selectorType === 'repartidor' ? equipo : tiendas).map((item: any) => (
                   <button key={item.id} onClick={() => {
                     if (selectorType === 'repartidor') setRutaSocio(item);
                     else setCurrentTienda(item);
                     setSelectorType(null);
-                  }} className="w-full bg-black border border-zinc-800 p-5 rounded-2xl flex justify-between items-center active:bg-blue-600 transition-all">
+                  }} className="w-full bg-black border border-zinc-800 p-5 rounded-2xl flex justify-between items-center active:bg-blue-600 transition-colors">
                     <span className="font-bold text-white uppercase text-sm tracking-tight">{item.nombre || item.nombre_tienda}</span>
                     <ChevronRight size={18} className="text-zinc-700" />
                   </button>
@@ -232,7 +299,7 @@ export default function SFADashboard() {
         </div>
       )}
 
-      {/* MODAL ADAPTABLE (NUEVAS RUTAS / PRODUCTOS) */}
+      {/* MODAL MAESTRO ADAPTABLE */}
       {isModalOpen && (
         <div className="fixed inset-0 z-[300] bg-black/90 p-4 flex items-end sm:items-center justify-center animate-in slide-in-from-bottom duration-500">
           <div className="bg-zinc-900 w-full max-w-md rounded-t-[40px] sm:rounded-[40px] border border-zinc-800 p-8 max-h-[95vh] overflow-y-auto shadow-2xl">
@@ -240,6 +307,7 @@ export default function SFADashboard() {
               <h2 className="text-2xl font-black italic tracking-tighter uppercase">{editId ? 'Editar' : 'Nuevo'} {activeTab}</h2>
               <button onClick={() => setIsModalOpen(false)} className="bg-zinc-800 p-2 rounded-full text-zinc-500 active:scale-90"><X size={20}/></button>
             </div>
+            
             <form onSubmit={handleGuardarGral} className="space-y-4">
               {activeTab === 'panel' && (
                 <><input required placeholder="Nombre de la Tienda" className="w-full bg-black border border-zinc-800 rounded-2xl p-4 outline-none" value={tNombre} onChange={e => setTNombre(e.target.value)} /><input placeholder="Teléfono" className="w-full bg-black border border-zinc-800 rounded-2xl p-4 outline-none" value={tTel} onChange={e => setTTel(e.target.value)} /></>
@@ -253,26 +321,23 @@ export default function SFADashboard() {
               {activeTab === 'rutas' && (
                 <div className="space-y-5 pb-5">
                    <button type="button" onClick={() => setSelectorType('repartidor')} className="w-full bg-black border border-zinc-800 p-5 rounded-2xl flex justify-between items-center text-left active:border-blue-500 transition-all shadow-inner">
-                      <div><p className="text-[10px] font-black text-zinc-600 uppercase mb-1">Repartidor Asignado</p><p className="font-bold text-blue-500 text-lg uppercase italic">{rutaSocio?.nombre || 'Seleccionar Socio'}</p></div>
-                      <Users size={20} className="text-zinc-700"/>
+                      <div><p className="text-[10px] font-black text-zinc-600 uppercase mb-1">Repartidor Asignado</p><p className="font-bold text-blue-500 text-lg uppercase italic">{rutaSocio?.nombre || 'Elegir Socio'}</p></div>
+                      <ChevronRight size={20} className="text-zinc-700"/>
                    </button>
 
                    <div className="bg-zinc-950 border border-zinc-800 rounded-[32px] p-6 space-y-4 shadow-2xl">
                       <div className="flex justify-between items-center px-1">
-                         <p className="text-[11px] font-black text-zinc-500 uppercase tracking-widest">Paradas: {paradas.length}</p>
-                         <button type="button" onClick={() => setSelectorType('tienda')} className="text-blue-500 text-[11px] font-black italic">+ AGREGAR TIENDA</button>
+                         <p className="text-[11px] font-black text-zinc-500 uppercase tracking-widest">Tiendas en Ruta: {paradas.length}</p>
+                         <button type="button" onClick={() => setSelectorType('tienda')} className="text-blue-500 text-[11px] font-black italic">+ AGREGAR PARADA</button>
                       </div>
 
                       {currentTienda && (
                         <div className="bg-blue-600/5 border border-blue-500/20 p-5 rounded-[24px] animate-in zoom-in duration-300">
                            <div className="flex justify-between items-center mb-4"><p className="text-[10px] font-black text-blue-500 uppercase italic">Cargar para: {currentTienda.nombre_tienda}</p><button type="button" onClick={()=>setCurrentTienda(null)} className="text-zinc-600"><X size={16}/></button></div>
-                           <div className="relative mb-4"><Search className="absolute left-3 top-3 text-zinc-600" size={16} /><input placeholder="Buscar producto (ej. Café)..." className="w-full bg-black border border-zinc-800 rounded-xl p-3 pl-10 text-xs text-white outline-none focus:border-blue-500" value={filtroProd} onChange={e => setFiltroProd(e.target.value)} /></div>
-                           <div className="max-h-48 overflow-y-auto space-y-2 pr-1">
-                              {prodsFiltrados.length === 0 && filtroProd && <p className="text-[9px] text-zinc-700 text-center uppercase py-2">No se encontró ese artículo</p>}
-                              {prodsFiltrados.map(p => (
-                                <button key={p.id} type="button" onClick={() => agregarItemARuta(p)} className="w-full bg-zinc-900 p-3 rounded-xl text-[10px] font-bold text-left border border-zinc-800 flex justify-between items-center active:scale-95 transition-all"><span>{p.nombre}</span> <span className="text-blue-500 font-black">${p.precio}</span></button>
-                              ))}
-                           </div>
+                           <div className="relative mb-4"><Search className="absolute left-3 top-3 text-zinc-600" size={16} /><input placeholder="Buscar producto por nombre..." className="w-full bg-black border border-zinc-800 rounded-xl p-3 pl-10 text-xs text-white" value={filtroProd} onChange={e => setFiltroProd(e.target.value)} /></div>
+                           <div className="max-h-48 overflow-y-auto space-y-2 pr-1">{prodsFiltrados.map(p => (
+                                <button key={p.id} type="button" onClick={() => iniciarAgregadoProducto(p)} className="w-full bg-zinc-900/50 p-3 rounded-xl text-[10px] font-bold text-left border border-zinc-800 flex justify-between items-center"><span>{p.nombre}</span> <span className="text-blue-500 font-black">${p.precio}</span></button>
+                              ))}</div>
                         </div>
                       )}
 
@@ -293,6 +358,7 @@ export default function SFADashboard() {
 
                    <div className="bg-blue-600 p-6 rounded-[32px] flex justify-between items-center shadow-2xl shadow-blue-600/40">
                       <div><p className="text-[10px] font-black text-blue-100 uppercase tracking-widest">Total Ruta GDL</p><p className="text-2xl font-black text-white italic">${paradas.reduce((acc, p) => acc + p.items.reduce((accI:number, i:any) => accI + (i.precio*i.cantidad), 0), 0)}</p></div>
+                      {/* FIXED SAVE BUTTON TYPE */}
                       <button type="submit" className="bg-white text-blue-600 p-3.5 rounded-2xl active:scale-90 transition-all shadow-xl"><Save size={24}/></button>
                    </div>
                 </div>
@@ -307,7 +373,7 @@ export default function SFADashboard() {
 
       {/* DETALLE DE MONITOREO (RUTAS 24/7) */}
       {activeRouteDetail && (
-        <div className="fixed inset-0 z-[600] bg-black p-8 animate-in fade-in duration-300 overflow-y-auto antialiased">
+        <div className="fixed inset-0 z-[600] bg-black p-8 animate-in fade-in duration-300 overflow-y-auto antialiased relative">
            <div className="max-w-2xl mx-auto">
               <button onClick={() => setActiveRouteDetail(null)} className="absolute top-10 right-10 bg-zinc-900 p-3 rounded-full text-zinc-500 active:scale-90 shadow-lg"><X size={24}/></button>
               <div className="mt-12 mb-12">
@@ -381,9 +447,9 @@ export default function SFADashboard() {
         </div>
       )}
 
-      {/* QR VIEW (NEGRO TOTAL) */}
+      {/* QR VIEW */}
       {selectedTienda && (
-        <div className="fixed inset-0 z-[400] bg-black flex flex-col items-center justify-center p-8 animate-in fade-in">
+        <div className="fixed inset-0 z-[400] bg-black flex flex-col items-center justify-center p-8 animate-in fade-in relative">
            <button onClick={() => setSelectedTienda(null)} className="absolute top-10 right-10 bg-zinc-900 p-3 rounded-full shadow-xl"><X size={24}/></button>
            <div className="text-center animate-in zoom-in duration-300">
               <h2 className="text-5xl font-black italic mb-2 tracking-tighter text-white uppercase">{selectedTienda.nombre_tienda}</h2>
