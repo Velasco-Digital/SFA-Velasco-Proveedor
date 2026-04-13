@@ -4,7 +4,7 @@ import { supabase } from '../lib/supabase';
 import { PlusCircle, MapPin, QrCode, Truck, Users, LayoutDashboard } from 'lucide-react';
 
 export default function SFADashboard() {
-  const [tiendas, setTiendas] = useState([]);
+  const [tiendas, setTiendas] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
 
   // Cargar tiendas desde el "Servidor Maestro"
