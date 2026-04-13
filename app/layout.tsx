@@ -1,5 +1,5 @@
 import type { Metadata } from "next";
-import "./globals.css"; // <-- Esto es lo que "prende" el diseño
+import "./globals.css";
 
 export const metadata: Metadata = {
   title: "VD SFA - Velasco Digital",
