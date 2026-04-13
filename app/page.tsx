@@ -1,6 +1,6 @@
 'use client'
 import { useState, useEffect } from 'react';
-import { supabase } from '@/lib/supabase';
+import { supabase } from '../lib/supabase';
 import { PlusCircle, MapPin, QrCode, Truck, Users, LayoutDashboard } from 'lucide-react';
 
 export default function SFADashboard() {

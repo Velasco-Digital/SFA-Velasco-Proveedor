@@ -1,6 +1,6 @@
 // app/layout.tsx
 import type { Metadata } from "next";
-import "./globals.css"; // No te preocupes si marca error aquí ahorita
+
 
 export const metadata: Metadata = {
   title: "VD SFA - Velasco Digital",
