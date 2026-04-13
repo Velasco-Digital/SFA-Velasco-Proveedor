@@ -3,252 +3,335 @@ import { useState, useEffect } from 'react';
 import { supabase } from '../lib/supabase';
 import { 
   PlusCircle, MapPin, QrCode, Truck, Users, LayoutDashboard, 
-  X, Save, Navigation, Edit2, Phone, Trash2, AlertTriangle, Package, Briefcase
+  X, Save, Navigation, Edit2, Phone, Trash2, AlertTriangle, Package, Briefcase, ShoppingBag
 } from 'lucide-react';
 import { QRCodeSVG } from 'qrcode.react';
 
 export default function SFADashboard() {
-  const [activeTab, setActiveTab] = useState('panel');
+  const [activeTab, setActiveTab] = useState('panel'); // panel, productos, rutas, equipo
   const [loading, setLoading] = useState(true);
   
-  // --- DATOS ---
+  // --- ESTADOS DE DATOS ---
   const [tiendas, setTiendas] = useState<any[]>([]);
   const [productos, setProductos] = useState<any[]>([]);
+  const [equipo, setEquipo] = useState<any[]>([]);
 
-  // --- MODALES ---
+  // --- ESTADOS DE UI ---
   const [isModalOpen, setIsModalOpen] = useState(false);
   const [selectedTienda, setSelectedTienda] = useState<any>(null);
   const [showDeleteConfirm, setShowDeleteConfirm] = useState(false);
   const [itemABorrar, setItemABorrar] = useState<any>(null);
 
-  // --- FORMULARIOS ---
+  // --- FORMULARIOS (ESTADOS INDEPENDIENTES PARA EVITAR BUGS) ---
   const [editId, setEditId] = useState<string | null>(null);
   
-  // Campos Tienda
-  const [nombre, setNombre] = useState('');
-  const [dueno, setDueno] = useState('');
-  const [telefono, setTelefono] = useState('');
-  const [direccion, setDireccion] = useState('');
-  const [coords, setCoords] = useState({ lat: null, lng: null });
+  // Tiendas
+  const [tNombre, setTNombre] = useState('');
+  const [tDueno, setTDueno] = useState('');
+  const [tTel, setTTel] = useState('');
+  const [tDir, setTDir] = useState('');
+  const [tCoords, setTCoords] = useState({ lat: null, lng: null });
 
-  // Campos Producto
-  const [prodNombre, setProdNombre] = useState('');
-  const [prodPrecio, setProdPrecio] = useState('');
-  const [prodStock, setProdStock] = useState('');
-  const [prodCat, setProdCat] = useState('');
+  // Productos
+  const [pNombre, setPNombre] = useState('');
+  const [pPrecio, setPPrecio] = useState('');
+  const [pStock, setPStock] = useState('');
+  const [pCat, setPCat] = useState('');
+
+  // Equipo
+  const [sNombre, setSNombre] = useState('');
+  const [sTel, setSTel] = useState('');
+  const [sPuesto, setSPuesto] = useState('Repartidor');
 
   useEffect(() => { cargarDatos(); }, [activeTab]);
 
   async function cargarDatos() {
     setLoading(true);
-    if (activeTab === 'panel') {
-      const { data } = await supabase.from('sfa_tiendas').select('*').order('created_at', { ascending: false });
-      if (data) setTiendas(data);
-    }
-    if (activeTab === 'productos') {
-      const { data } = await supabase.from('sfa_productos').select('*').order('nombre', { ascending: true });
-      if (data) setProductos(data);
-    }
+    try {
+      if (activeTab === 'panel') {
+        const { data } = await supabase.from('sfa_tiendas').select('*').order('created_at', { ascending: false });
+        setTiendas(data || []);
+      } else if (activeTab === 'productos') {
+        const { data } = await supabase.from('sfa_productos').select('*').order('nombre', { ascending: true });
+        setProductos(data || []);
+      } else if (activeTab === 'equipo') {
+        const { data } = await supabase.from('sfa_equipo').select('*').order('nombre', { ascending: true });
+        setEquipo(data || []);
+      }
+    } catch (e) { console.error(e); }
     setLoading(false);
   }
 
-  const obtenerUbicacion = () => {
-    navigator.geolocation.getCurrentPosition((pos) => {
-      setCoords({ lat: pos.coords.latitude as any, lng: pos.coords.longitude as any });
-    }, () => alert("Viejo, activa el GPS en tu cel"));
-  };
-
-  // Botón "+" Inteligente
-  const handlePlusButton = () => {
+  // --- MANEJO DE MODALES ---
+  const abrirModalNuevo = () => {
     setEditId(null);
-    if (activeTab === 'panel') {
-      setNombre(''); setDueno(''); setTelefono(''); setDireccion(''); setCoords({ lat: null, lng: null });
-    } else if (activeTab === 'productos') {
-      setProdNombre(''); setProdPrecio(''); setProdStock(''); setProdCat('');
-    }
+    setTNombre(''); setTDueno(''); setTTel(''); setTDir(''); setTCoords({lat:null, lng:null});
+    setPNombre(''); setPPrecio(''); setPStock(''); setPCat('');
+    setSNombre(''); setSTel(''); setSPuesto('Repartidor');
     setIsModalOpen(true);
   };
 
-  const handleEdit = (item: any) => {
+  const prepararEdicion = (item: any) => {
     setEditId(item.id);
     if (activeTab === 'panel') {
-      setNombre(item.nombre_tienda); setDueno(item.dueno || ''); 
-      setTelefono(item.telefono || ''); setDireccion(item.direccion || '');
-      setCoords({ lat: item.latitud, lng: item.longitud });
+      setTNombre(item.nombre_tienda); setTDueno(item.dueno || ''); 
+      setTTel(item.telefono || ''); setTDir(item.direccion || '');
+      setTCoords({ lat: item.latitud, lng: item.longitud });
     } else if (activeTab === 'productos') {
-      setProdNombre(item.nombre); setProdPrecio(item.precio.toString());
-      setProdStock(item.stock.toString()); setProdCat(item.categoria || '');
+      setPNombre(item.nombre); setPPrecio(item.precio.toString());
+      setPStock(item.stock.toString()); setPCat(item.categoria || '');
+    } else if (activeTab === 'equipo') {
+      setSNombre(item.nombre); setSTel(item.telefono || ''); setSPuesto(item.puesto || 'Repartidor');
     }
     setIsModalOpen(true);
   };
 
+  // --- CRUD: GUARDAR ---
   async function handleGuardar(e: React.FormEvent) {
     e.preventDefault();
+    let error;
+
     if (activeTab === 'panel') {
-      const p = { nombre_tienda: nombre, dueno, telefono, direccion, latitud: coords.lat, longitud: coords.lng };
-      if (editId) await supabase.from('sfa_tiendas').update(p).eq('id', editId);
-      else await supabase.from('sfa_tiendas').insert([{ ...p, codigo_qr: `SFA-${Math.random().toString(36).substr(2, 7).toUpperCase()}` }]);
+      const p = { nombre_tienda: tNombre, dueno: tDueno, telefono: tTel, direccion: tDir, latitud: tCoords.lat, longitud: tCoords.lng };
+      if (editId) {
+        ({ error } = await supabase.from('sfa_tiendas').update(p).eq('id', editId));
+      } else {
+        const qr = `SFA-${Math.random().toString(36).substr(2, 7).toUpperCase()}`;
+        ({ error } = await supabase.from('sfa_tiendas').insert([{ ...p, codigo_qr: qr }]));
+      }
     } else if (activeTab === 'productos') {
-      const p = { nombre: prodNombre, precio: parseFloat(prodPrecio), stock: parseInt(prodStock), categoria: prodCat };
-      if (editId) await supabase.from('sfa_productos').update(p).eq('id', editId);
-      else await supabase.from('sfa_productos').insert([p]);
+      const p = { nombre: pNombre, precio: parseFloat(pPrecio), stock: parseInt(pStock), categoria: pCat };
+      if (editId) {
+        ({ error } = await supabase.from('sfa_productos').update(p).eq('id', editId));
+      } else {
+        ({ error } = await supabase.from('sfa_productos').insert([p]));
+      }
+    } else if (activeTab === 'equipo') {
+      const p = { nombre: sNombre, telefono: sTel, puesto: sPuesto };
+      if (editId) {
+        ({ error } = await supabase.from('sfa_equipo').update(p).eq('id', editId));
+      } else {
+        ({ error } = await supabase.from('sfa_equipo').insert([p]));
+      }
     }
-    setIsModalOpen(false);
-    cargarDatos();
+
+    if (error) alert("Error de Conexión: " + error.message);
+    else { setIsModalOpen(false); cargarDatos(); }
+  }
+
+  // --- CRUD: ELIMINAR ---
+  async function ejecutarEliminacion() {
+    const tabla = activeTab === 'panel' ? 'sfa_tiendas' : activeTab === 'productos' ? 'sfa_productos' : 'sfa_equipo';
+    const { error } = await supabase.from(tabla).delete().eq('id', itemABorrar.id);
+    if (!error) { setShowDeleteConfirm(false); cargarDatos(); }
   }
 
   return (
-    <div className="min-h-screen bg-black text-white pb-32 font-sans antialiased">
-      {/* HEADER */}
-      <header className="p-6 border-b border-zinc-800 bg-zinc-950/50 backdrop-blur-md sticky top-0 z-50">
-        <div className="flex justify-between items-center">
+    <div className="min-h-screen bg-black text-white pb-32 font-sans selection:bg-blue-500/30">
+      {/* HEADER PREMIUM */}
+      <header className="p-6 border-b border-zinc-800 bg-zinc-950/80 backdrop-blur-xl sticky top-0 z-50">
+        <div className="flex justify-between items-center max-w-2xl mx-auto">
           <div>
-            <h1 className="text-xl font-black text-blue-500 tracking-tighter italic">VD SFA</h1>
-            <p className="text-[9px] text-zinc-500 font-bold uppercase tracking-widest">{activeTab === 'panel' ? 'Clientes' : activeTab}</p>
+            <h1 className="text-2xl font-black text-blue-500 tracking-tighter italic">VELASCO DIGITAL</h1>
+            <div className="flex items-center gap-2">
+              <div className="h-1.5 w-1.5 rounded-full bg-green-500 animate-pulse" />
+              <p className="text-[10px] text-zinc-500 font-bold uppercase tracking-[0.2em]">{activeTab}</p>
+            </div>
           </div>
-          {(activeTab === 'panel' || activeTab === 'productos') && (
-            <button onClick={handlePlusButton} className="bg-blue-600 p-2 rounded-full active:scale-90 shadow-lg shadow-blue-500/40">
-              <PlusCircle size={24} />
-            </button>
-          )}
+          <button onClick={abrirModalNuevo} className="bg-blue-600 p-2.5 rounded-full shadow-lg shadow-blue-600/20 active:scale-90 transition-transform">
+            <PlusCircle size={26} />
+          </button>
         </div>
       </header>
 
-      <main className="p-4">
+      <main className="p-4 max-w-2xl mx-auto">
         {loading ? (
-          <div className="text-center py-20 text-zinc-600 text-xs font-bold uppercase animate-pulse">Sincronizando...</div>
+          <div className="flex flex-col items-center justify-center py-32 space-y-4">
+            <div className="w-8 h-8 border-4 border-blue-500/20 border-t-blue-500 rounded-full animate-spin" />
+            <p className="text-[10px] font-black text-zinc-600 uppercase tracking-widest">Sincronizando Nube...</p>
+          </div>
         ) : (
-          <div className="animate-in fade-in duration-500">
-            {activeTab === 'panel' && (
-              <div className="space-y-3">
-                {tiendas.map(t => (
-                  <div key={t.id} className="bg-zinc-900 border border-zinc-800 p-4 rounded-2xl flex justify-between items-center">
-                    <div className="flex items-center gap-3 flex-1" onClick={() => setSelectedTienda(t)}>
-                      <div className={`p-3 rounded-2xl ${t.latitud ? 'bg-blue-500/10 text-blue-500' : 'bg-zinc-800 text-zinc-500'}`}><MapPin size={22} /></div>
-                      <div><h3 className="font-bold text-sm leading-tight">{t.nombre_tienda}</h3><p className="text-[10px] text-zinc-500">{t.telefono || 'Sin contacto'}</p></div>
-                    </div>
-                    <div className="flex gap-1">
-                      <button onClick={() => handleEdit(t)} className="p-2 text-zinc-500"><Edit2 size={18}/></button>
-                      <button onClick={() => { setItemABorrar(t); setShowDeleteConfirm(true); }} className="p-2 text-red-900/50"><Trash2 size={18}/></button>
-                    </div>
+          <div className="animate-in fade-in slide-in-from-bottom-4 duration-700">
+            {/* VISTA TIENDAS */}
+            {activeTab === 'panel' && tiendas.map(t => (
+              <div key={t.id} className="bg-zinc-900/50 border border-zinc-800 p-5 rounded-[24px] mb-4 flex justify-between items-center group active:bg-zinc-800 transition-colors">
+                <div className="flex items-center gap-4 flex-1" onClick={() => setSelectedTienda(t)}>
+                  <div className={`p-4 rounded-2xl ${t.latitud ? 'bg-blue-500 text-white shadow-lg shadow-blue-500/20' : 'bg-zinc-800 text-zinc-500'}`}>
+                    <MapPin size={24} />
                   </div>
-                ))}
+                  <div>
+                    <h3 className="font-bold text-base">{t.nombre_tienda}</h3>
+                    <p className="text-xs text-zinc-500 font-medium">{t.dueno || 'Sin titular'}</p>
+                  </div>
+                </div>
+                <div className="flex gap-2">
+                  <button onClick={() => prepararEdicion(t)} className="p-2 text-zinc-500 hover:text-white"><Edit2 size={20}/></button>
+                  <button onClick={() => { setItemABorrar(t); setShowDeleteConfirm(true); }} className="p-2 text-red-900/40 hover:text-red-500"><Trash2 size={20}/></button>
+                </div>
               </div>
-            )}
+            ))}
 
+            {/* VISTA STOCK */}
             {activeTab === 'productos' && (
-              <div className="grid grid-cols-2 gap-3">
+              <div className="grid grid-cols-2 gap-4">
                 {productos.map(p => (
-                  <div key={p.id} className="bg-zinc-900 border border-zinc-800 p-4 rounded-3xl relative">
-                    <div className="flex justify-between items-start mb-3">
-                      <div className="w-10 h-10 bg-blue-500/10 rounded-xl flex items-center justify-center text-blue-500"><Package size={20}/></div>
-                      <div className="flex gap-2">
-                         <button onClick={() => handleEdit(p)} className="text-zinc-600"><Edit2 size={14}/></button>
-                         <button onClick={() => { setItemABorrar(p); setShowDeleteConfirm(true); }} className="text-red-900/40"><Trash2 size={14}/></button>
+                  <div key={p.id} className="bg-zinc-900/50 border border-zinc-800 p-5 rounded-[32px] relative group">
+                    <div className="flex justify-between items-start mb-4">
+                      <div className="bg-blue-500/10 p-3 rounded-2xl text-blue-500"><Package size={22}/></div>
+                      <div className="flex gap-2 opacity-0 group-hover:opacity-100 transition-opacity">
+                        <button onClick={() => prepararEdicion(p)} className="text-zinc-500"><Edit2 size={14}/></button>
+                        <button onClick={() => { setItemABorrar(p); setShowDeleteConfirm(true); }} className="text-red-500"><Trash2 size={14}/></button>
                       </div>
                     </div>
-                    <h3 className="font-bold text-xs leading-tight mb-1">{p.nombre}</h3>
-                    <p className="text-blue-500 font-black text-sm">${p.precio}</p>
-                    <p className="text-[9px] text-zinc-500 uppercase mt-2 font-bold tracking-tighter">Stock: {p.stock} pz</p>
+                    <h3 className="font-bold text-sm mb-1 leading-tight">{p.nombre}</h3>
+                    <div className="flex justify-between items-end mt-4">
+                      <p className="text-blue-500 font-black text-lg">${p.precio}</p>
+                      <span className="text-[10px] bg-zinc-800 px-2 py-1 rounded-lg font-bold text-zinc-400">Stock: {p.stock}</span>
+                    </div>
                   </div>
                 ))}
               </div>
             )}
 
-            {activeTab === 'rutas' && <div className="text-center py-20 text-zinc-500">📍 Próximamente: Logística de Rutas</div>}
-            {activeTab === 'equipo' && <div className="text-center py-20 text-zinc-500">👥 Próximamente: Gestión de Personal</div>}
+            {/* VISTA RUTAS */}
+            {activeTab === 'rutas' && (
+              <div className="py-20 text-center">
+                <div className="w-20 h-20 bg-zinc-900 rounded-full flex items-center justify-center mx-auto mb-6 border border-zinc-800">
+                  <Truck size={32} className="text-zinc-700" />
+                </div>
+                <h2 className="text-lg font-bold">Logística de Rutas</h2>
+                <p className="text-zinc-500 text-xs max-w-[200px] mx-auto mt-2">Próximamente: Optimización de entregas mediante IA de Velasco Digital.</p>
+              </div>
+            )}
+
+            {/* VISTA EQUIPO */}
+            {activeTab === 'equipo' && equipo.map(s => (
+              <div key={s.id} className="bg-zinc-900/50 border border-zinc-800 p-5 rounded-[24px] mb-4 flex justify-between items-center">
+                <div className="flex items-center gap-4">
+                  <div className="p-4 rounded-2xl bg-zinc-800 text-zinc-400"><Users size={24} /></div>
+                  <div>
+                    <h3 className="font-bold text-base">{s.nombre}</h3>
+                    <p className="text-xs text-blue-500 font-bold uppercase tracking-widest">{s.puesto}</p>
+                  </div>
+                </div>
+                <div className="flex gap-2">
+                  <button onClick={() => prepararEdicion(s)} className="p-2 text-zinc-500"><Edit2 size={20}/></button>
+                  <button onClick={() => { setItemABorrar(s); setShowDeleteConfirm(true); }} className="p-2 text-red-900/40"><Trash2 size={20}/></button>
+                </div>
+              </div>
+            ))}
           </div>
         )}
       </main>
 
-      {/* NOTIFICACIÓN TIPO IPHONE (CONFIRMAR BORRADO) */}
+      {/* MODAL IPHONE STYLE (CONFIRMACIÓN) */}
       {showDeleteConfirm && (
-        <div className="fixed inset-0 z-[200] flex items-center justify-center p-6 bg-black/60 backdrop-blur-sm animate-in fade-in">
-          <div className="bg-zinc-900/90 border border-zinc-800 w-full max-w-[280px] rounded-[28px] overflow-hidden shadow-2xl animate-in zoom-in-95">
-            <div className="p-6 text-center">
-              <div className="bg-red-500/10 text-red-500 w-12 h-12 rounded-full flex items-center justify-center mx-auto mb-4"><AlertTriangle size={24} /></div>
-              <h2 className="text-lg font-bold mb-1 italic">¿Eliminar?</h2>
-              <p className="text-[11px] text-zinc-400">Esta acción es irreversible en el sistema Velasco Digital.</p>
+        <div className="fixed inset-0 z-[200] flex items-center justify-center p-6 bg-black/60 backdrop-blur-md animate-in fade-in duration-300">
+          <div className="bg-zinc-900/90 border border-zinc-800 w-full max-w-[280px] rounded-[32px] overflow-hidden shadow-2xl animate-in zoom-in-95">
+            <div className="p-8 text-center">
+              <div className="bg-red-500/10 text-red-500 w-14 h-14 rounded-full flex items-center justify-center mx-auto mb-4"><AlertTriangle size={28} /></div>
+              <h2 className="text-xl font-bold mb-2">¿Eliminar?</h2>
+              <p className="text-xs text-zinc-500 leading-relaxed">Esta acción borrará el registro de los servidores de Velasco Digital.</p>
             </div>
             <div className="flex border-t border-zinc-800">
-              <button onClick={() => setShowDeleteConfirm(false)} className="flex-1 p-4 text-xs font-medium border-r border-zinc-800 active:bg-zinc-800">Cancelar</button>
-              <button onClick={async () => {
-                const tabla = activeTab === 'panel' ? 'sfa_tiendas' : 'sfa_productos';
-                await supabase.from(tabla).delete().eq('id', itemABorrar.id);
-                setShowDeleteConfirm(false); cargarDatos();
-              }} className="flex-1 p-4 text-xs font-bold text-red-500 active:bg-zinc-800">Eliminar</button>
+              <button onClick={() => setShowDeleteConfirm(false)} className="flex-1 p-5 text-sm font-medium border-r border-zinc-800 active:bg-zinc-800">Cancelar</button>
+              <button onClick={ejecutarEliminacion} className="flex-1 p-5 text-sm font-black text-red-500 active:bg-zinc-800">Eliminar</button>
             </div>
           </div>
         </div>
       )}
 
-      {/* MODAL ADAPTABLE (FORMULARIO) */}
+      {/* FORMULARIO ADAPTABLE (MAESTRO) */}
       {isModalOpen && (
-        <div className="fixed inset-0 z-[100] bg-black/90 p-4 flex items-end sm:items-center justify-center animate-in slide-in-from-bottom duration-300">
-          <div className="bg-zinc-900 w-full max-w-md rounded-t-[32px] sm:rounded-[32px] border border-zinc-800 p-6 shadow-2xl">
-            <div className="flex justify-between mb-6">
-              <h2 className="text-xl font-black italic">{editId ? 'Editar' : 'Nuevo'} {activeTab === 'panel' ? 'Cliente' : 'Producto'}</h2>
-              <button onClick={() => setIsModalOpen(false)} className="bg-zinc-800 p-1 rounded-full text-zinc-500"><X size={20}/></button>
+        <div className="fixed inset-0 z-[100] bg-black/90 p-4 flex items-end sm:items-center justify-center animate-in slide-in-from-bottom duration-500">
+          <div className="bg-zinc-900 w-full max-w-md rounded-t-[40px] sm:rounded-[40px] border border-zinc-800 p-8 shadow-2xl shadow-blue-500/5">
+            <div className="flex justify-between items-center mb-8">
+              <h2 className="text-2xl font-black italic">{editId ? 'EDITAR' : 'NUEVO'} {activeTab.toUpperCase()}</h2>
+              <button onClick={() => setIsModalOpen(false)} className="bg-zinc-800 p-2 rounded-full text-zinc-400"><X size={20}/></button>
             </div>
-            <form onSubmit={handleGuardar} className="space-y-4">
-              {activeTab === 'panel' ? (
+            
+            <form onSubmit={handleGuardar} className="space-y-5">
+              {activeTab === 'panel' && (
                 <>
-                  <input required placeholder="Nombre del Negocio" className="w-full bg-black border border-zinc-800 rounded-2xl p-4 outline-none focus:border-blue-500" value={nombre} onChange={e => setNombre(e.target.value)} />
-                  <div className="grid grid-cols-2 gap-3">
-                    <input placeholder="Dueño" className="w-full bg-black border border-zinc-800 rounded-2xl p-4 outline-none" value={dueno} onChange={e => setDueno(e.target.value)} />
-                    <input placeholder="Teléfono" className="w-full bg-black border border-zinc-800 rounded-2xl p-4 outline-none" value={telefono} onChange={e => setTelefono(e.target.value)} />
+                  <div className="space-y-1">
+                    <label className="text-[10px] font-black text-zinc-500 ml-2 uppercase tracking-widest">Nombre del Negocio</label>
+                    <input required className="w-full bg-black border border-zinc-800 rounded-2xl p-4 focus:border-blue-500 transition-all outline-none" value={tNombre} onChange={e => setTNombre(e.target.value)} />
                   </div>
-                  <input placeholder="Dirección" className="w-full bg-black border border-zinc-800 rounded-2xl p-4 outline-none" value={direccion} onChange={e => setDireccion(e.target.value)} />
-                  <button type="button" onClick={obtenerUbicacion} className={`w-full p-4 rounded-2xl border flex items-center justify-center gap-2 transition-all ${coords.lat ? 'border-blue-500 text-blue-500 bg-blue-500/5' : 'border-zinc-800 text-zinc-500'}`}>
-                    <Navigation size={20} /> {coords.lat ? 'Ubicación GPS Capturada ✓' : 'Fijar Ubicación de Tienda'}
+                  <div className="grid grid-cols-2 gap-4">
+                    <div className="space-y-1">
+                      <label className="text-[10px] font-black text-zinc-500 ml-2 uppercase tracking-widest">Dueño</label>
+                      <input className="w-full bg-black border border-zinc-800 rounded-2xl p-4 outline-none" value={tDueno} onChange={e => setTDueno(e.target.value)} />
+                    </div>
+                    <div className="space-y-1">
+                      <label className="text-[10px] font-black text-zinc-500 ml-2 uppercase tracking-widest">Teléfono</label>
+                      <input className="w-full bg-black border border-zinc-800 rounded-2xl p-4 outline-none" value={tTel} onChange={e => setTTel(e.target.value)} />
+                    </div>
+                  </div>
+                  <input placeholder="Dirección Exacta" className="w-full bg-black border border-zinc-800 rounded-2xl p-4 outline-none" value={tDir} onChange={e => setTDir(e.target.value)} />
+                  <button type="button" onClick={() => { navigator.geolocation.getCurrentPosition(p => setTCoords({lat: p.coords.latitude as any, lng: p.coords.longitude as any})) }} className={`w-full p-4 rounded-2xl border-2 flex items-center justify-center gap-3 font-bold transition-all ${tCoords.lat ? 'border-blue-500 text-blue-500 bg-blue-500/5' : 'border-zinc-800 text-zinc-500 hover:border-zinc-700'}`}>
+                    <Navigation size={22}/> {tCoords.lat ? 'GPS CAPTURADO ✓' : 'FIJAR UBICACIÓN GPS'}
                   </button>
                 </>
-              ) : (
+              )}
+
+              {activeTab === 'productos' && (
                 <>
-                  <input required placeholder="Producto" className="w-full bg-black border border-zinc-800 rounded-2xl p-4 outline-none focus:border-blue-500" value={prodNombre} onChange={e => setProdNombre(e.target.value)} />
-                  <div className="grid grid-cols-2 gap-3">
-                    <input required type="number" placeholder="Precio $" className="w-full bg-black border border-zinc-800 rounded-2xl p-4 outline-none" value={prodPrecio} onChange={e => setProdPrecio(e.target.value)} />
-                    <input required type="number" placeholder="Stock" className="w-full bg-black border border-zinc-800 rounded-2xl p-4 outline-none" value={prodStock} onChange={e => setProdStock(e.target.value)} />
+                  <input required placeholder="Nombre del Producto" className="w-full bg-black border border-zinc-800 rounded-2xl p-4 focus:border-blue-500 outline-none" value={pNombre} onChange={e => setPNombre(e.target.value)} />
+                  <div className="grid grid-cols-2 gap-4">
+                    <input required type="number" step="0.01" placeholder="Precio $" className="w-full bg-black border border-zinc-800 rounded-2xl p-4 outline-none" value={pPrecio} onChange={e => setPPrecio(e.target.value)} />
+                    <input required type="number" placeholder="Stock Inicial" className="w-full bg-black border border-zinc-800 rounded-2xl p-4 outline-none" value={pStock} onChange={e => setPStock(e.target.value)} />
                   </div>
-                  <input placeholder="Categoría" className="w-full bg-black border border-zinc-800 rounded-2xl p-4 outline-none" value={prodCat} onChange={e => setProdCat(e.target.value)} />
+                  <input placeholder="Categoría (Ej. Bebidas)" className="w-full bg-black border border-zinc-800 rounded-2xl p-4 outline-none" value={pCat} onChange={e => setPCat(e.target.value)} />
                 </>
               )}
-              <button type="submit" className="w-full bg-blue-600 p-5 rounded-2xl font-black uppercase text-xs tracking-widest shadow-lg shadow-blue-600/20 active:scale-95 transition-all">
-                <Save size={20} className="inline mr-2" /> Guardar Cambios
+
+              {activeTab === 'equipo' && (
+                <>
+                  <input required placeholder="Nombre Completo" className="w-full bg-black border border-zinc-800 rounded-2xl p-4 focus:border-blue-500 outline-none" value={sNombre} onChange={e => setSNombre(e.target.value)} />
+                  <input placeholder="Número de Contacto" className="w-full bg-black border border-zinc-800 rounded-2xl p-4 outline-none" value={sTel} onChange={e => setSTel(e.target.value)} />
+                  <select className="w-full bg-black border border-zinc-800 rounded-2xl p-4 outline-none text-zinc-400" value={sPuesto} onChange={e => setSPuesto(e.target.value)}>
+                    <option value="Repartidor">Repartidor</option>
+                    <option value="Vendedor">Vendedor</option>
+                    <option value="Administrador">Administrador</option>
+                  </select>
+                </>
+              )}
+
+              <button type="submit" className="w-full bg-blue-600 p-5 rounded-2xl font-black text-sm uppercase tracking-[0.3em] shadow-xl shadow-blue-600/30 active:scale-95 transition-all">
+                <Save className="inline mr-2" size={20}/> GUARDAR
               </button>
             </form>
           </div>
         </div>
       )}
 
-      {/* QR VIEW */}
+      {/* NAV INFERIOR (APPLE STYLE) */}
+      <nav className="fixed bottom-8 left-6 right-6 bg-zinc-900/80 backdrop-blur-2xl border border-white/5 p-2 rounded-[32px] flex justify-around items-center z-40 shadow-2xl">
+        {[
+          {id:'panel', icon: <LayoutDashboard size={22}/>},
+          {id:'productos', icon: <ShoppingBag size={22}/>},
+          {id:'rutas', icon: <Truck size={22}/>},
+          {id:'equipo', icon: <Users size={22}/>}
+        ].map(tab => (
+          <button key={tab.id} onClick={() => setActiveTab(tab.id)} className={`p-4 rounded-2xl transition-all duration-300 ${activeTab === tab.id ? 'bg-blue-600 text-white shadow-lg shadow-blue-600/30 scale-110' : 'text-zinc-500 hover:text-zinc-300'}`}>
+            {tab.icon}
+          </button>
+        ))}
+      </nav>
+
+      {/* QR VIEW (MODAL) */}
       {selectedTienda && (
-        <div className="fixed inset-0 z-[110] bg-black/95 p-6 flex items-center justify-center animate-in fade-in" onClick={() => setSelectedTienda(null)}>
-          <div className="text-center" onClick={e => e.stopPropagation()}>
-            <h2 className="text-2xl font-black italic mb-6">{selectedTienda.nombre_tienda}</h2>
-            <div className="bg-white p-8 rounded-[48px] inline-block shadow-2xl shadow-blue-500/40 animate-in zoom-in">
-              <QRCodeSVG value={selectedTienda.codigo_qr} size={220} />
+        <div className="fixed inset-0 z-[110] bg-black/98 flex items-center justify-center p-8" onClick={() => setSelectedTienda(null)}>
+          <div className="text-center animate-in zoom-in duration-300" onClick={e => e.stopPropagation()}>
+            <h2 className="text-4xl font-black italic mb-2 tracking-tighter">{selectedTienda.nombre_tienda}</h2>
+            <p className="text-blue-500 font-bold text-xs tracking-[0.5em] mb-12 uppercase">{selectedTienda.codigo_qr}</p>
+            <div className="bg-white p-10 rounded-[60px] inline-block shadow-2xl shadow-blue-500/20">
+              <QRCodeSVG value={selectedTienda.codigo_qr} size={260} />
             </div>
-            <p className="mt-6 text-zinc-500 font-mono text-xs uppercase tracking-widest">{selectedTienda.codigo_qr}</p>
+            <p className="mt-12 text-zinc-600 text-[10px] font-bold uppercase tracking-widest">Escanea para validar entrega</p>
           </div>
         </div>
       )}
-
-      {/* NAV INFERIOR */}
-      <nav className="fixed bottom-6 left-4 right-4 bg-zinc-900/80 backdrop-blur-xl border border-zinc-800 p-2 rounded-[32px] flex justify-around items-center z-40 shadow-2xl">
-        <button onClick={() => setActiveTab('panel')} className={`p-4 flex flex-col items-center transition-all ${activeTab === 'panel' ? 'text-blue-500 scale-110' : 'text-zinc-600 opacity-60'}`}>
-          <LayoutDashboard size={20} /><span className="text-[8px] font-black mt-1 uppercase">Tiendas</span>
-        </button>
-        <button onClick={() => setActiveTab('productos')} className={`p-4 flex flex-col items-center transition-all ${activeTab === 'productos' ? 'text-blue-500 scale-110' : 'text-zinc-600 opacity-60'}`}>
-          <Package size={20} /><span className="text-[8px] font-black mt-1 uppercase">Stock</span>
-        </button>
-        <button onClick={() => setActiveTab('rutas')} className={`p-4 flex flex-col items-center transition-all ${activeTab === 'rutas' ? 'text-blue-500 scale-110' : 'text-zinc-600 opacity-60'}`}>
-          <Truck size={20} /><span className="text-[8px] font-black mt-1 uppercase">Rutas</span>
-        </button>
-        <button onClick={() => setActiveTab('equipo')} className={`p-4 flex flex-col items-center transition-all ${activeTab === 'equipo' ? 'text-blue-500 scale-110' : 'text-zinc-600 opacity-60'}`}>
-          <Users size={20} /><span className="text-[8px] font-black mt-1 uppercase">Team</span>
-        </button>
-      </nav>
     </div>
   );
 }
